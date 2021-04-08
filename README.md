@@ -10,6 +10,7 @@
 <meta http-equiv="Content-Type" content="text/html; charset=utf-8"/>
 </head>
 <body>
+  <p><b>This is a fork from an awesome script I found. Thanks and credits to Adam Burford</b></p>
   <p><b>Create A KeyTab File Using PowerShell Script</b></p>
   <p>Follow this link for documentation.</p>
 <a href="https://therealadamburford.github.io/Create-KeyTab/">https://therealadamburford.github.io/Create-KeyTab/</a> 
