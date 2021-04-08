@@ -5,8 +5,8 @@
 .COMPANYNAME
 .COPYRIGHT
 .TAGS KeyTab Ktpass Key Tab
-.LICENSEURI https://github.com/TheRealAdamBurford/Create-KeyTab/blob/master/LICENSE
-.PROJECTURI https://github.com/TheRealAdamBurford/Create-KeyTab
+.LICENSEURI https://github.com/ConstantinT/Create-KeyTab/blob/master/LICENSE
+.PROJECTURI https://github.com/ConstantinT/Create-KeyTab
 .ICONURI
 .EXTERNALMODULEDEPENDENCIES 
 .REQUIREDSCRIPTS
@@ -24,10 +24,10 @@
 ###      Create-KeyTab.ps1
 ###
 ###      Created : 2019-10-26
-###      Modified: 2020-10-26
+###      Modified: 2021-04-08
 ###
 ###      Created By : Adam Burford
-###      Modified By: Adam Burford
+###      Modified By: Constantin Wenz
 ###
 ###
 ### Notes: Create RC4-HMAC, AES128. AES256 KeyTab file. Does not use AD. 
@@ -47,6 +47,7 @@
 ### 2020-01-30 - Add Info for posting to https://www.powershellgallery.com
 ### 2020-09-15 - Added suggested use of [decimal]::Parse from "https://github.com/matherm-aboehm" to fix timestamp error on localized versions of Windows. Line 535.
 ### 2020-10-26 - Add KRB5_NT_SRV_HST to possible PType values
+### 2021-04-08 - Add code to create keytab from EncryptionKeys
 ###
 ##########################################################
 ### Attribution:
@@ -94,23 +95,24 @@ Optional Parameters
 .NOTES
 Use -QUIET and -NOPROMPT for batch mode processing.
 
-.LINK
-https://www.linkedin.com/in/adamburford
 #>
 param (
-[Parameter(Mandatory=$true,HelpMessage="REALM name will be forced to Upper Case")]$Realm,
-[Parameter(Mandatory=$true,HelpMessage="Principal is case sensative. It must match the principal portion of the UPN",ValueFromPipelineByPropertyName=$true)]$Principal,
-[Parameter(Mandatory=$false)]$Password,
-[Parameter(Mandatory=$false)]$SALT,
-[Parameter(Mandatory=$false)]$File,
-[Parameter(Mandatory=$false,ValueFromPipelineByPropertyName=$true)]$KVNO=1,
-[Parameter(Mandatory=$false)][ValidateSet("KRB5_NT_PRINCIPAL", "KRB5_NT_SRV_INST", "KRB5_NT_SRV_HST", "KRB5_NT_UID")][String[]]$PType="KRB5_NT_PRINCIPAL",
-[Parameter(Mandatory=$false)][Switch]$RC4,
-[Parameter(Mandatory=$false)][Switch]$AES128,
-[Parameter(Mandatory=$false)][Switch]$AES256,
-[Parameter(Mandatory=$false)][Switch]$Append,
-[Parameter(Mandatory=$false)][Switch]$Quiet,
-[Parameter(Mandatory=$false)][Switch]$NoPrompt
+    [Parameter(Mandatory=$true,HelpMessage="REALM name will be forced to Upper Case")]$Realm,
+    [Parameter(Mandatory=$true,HelpMessage="Principal is case sensative. It must match the principal portion of the UPN",ValueFromPipelineByPropertyName=$true)]$Principal,
+    [Parameter(Mandatory=$false)]$Password,
+    [Parameter(Mandatory=$false)]$SALT,
+    [Parameter(Mandatory=$false)]$File,
+    [Parameter(Mandatory=$false,ValueFromPipelineByPropertyName=$true)]$KVNO=1,
+    [Parameter(Mandatory=$false)][ValidateSet("KRB5_NT_PRINCIPAL", "KRB5_NT_SRV_INST", "KRB5_NT_SRV_HST", "KRB5_NT_UID")][String[]]$PType="KRB5_NT_PRINCIPAL",
+    [Parameter(Mandatory=$false)][Switch]$RC4,
+    [Parameter(Mandatory=$false)][Switch]$AES128,
+    [Parameter(Mandatory=$false)][Switch]$AES256,
+    [Parameter(Mandatory=$false)][String]$RC4Hash,
+    [Parameter(Mandatory=$false)][String]$AES128Hash,
+    [Parameter(Mandatory=$false)][String]$AES256Hash,
+    [Parameter(Mandatory=$false)][Switch]$Append,
+    [Parameter(Mandatory=$false)][Switch]$Quiet,
+    [Parameter(Mandatory=$false)][Switch]$NoPrompt
 )
 
 function Get-MD4{
@@ -271,45 +273,45 @@ public class Shift
 }
 
 function Get-PBKDF2 {
-param (
-[Parameter(Mandatory=$true)]$PasswordString,
-[Parameter(Mandatory=$true)]$SALT,
-[Parameter(Mandatory=$true)][ValidateSet("16", "32")][String[]]$KeySize
-)
+    param (
+        [Parameter(Mandatory=$true)]$PasswordString,
+        [Parameter(Mandatory=$true)]$SALT,
+        [Parameter(Mandatory=$true)][ValidateSet("16", "32")][String[]]$KeySize
+    )
 
 ### Set Key Size
-switch($KeySize){
-"16"{
-    [int] $size = 16
-    break;
+    switch($KeySize){
+    "16"{
+        [int] $size = 16
+        break;
+        }
+    "32"{
+        [int] $size = 32
+        break;
+         }
+    default{}
     }
-"32"{
-    [int] $size = 32
-    break;
-     }
-default{}
-}
 
-[byte[]] $password = [Text.Encoding]::UTF8.GetBytes($PasswordString)
-[byte[]] $saltBytes = [Text.Encoding]::UTF8.GetBytes($SALT)
+    [byte[]] $password = [Text.Encoding]::UTF8.GetBytes($PasswordString)
+    [byte[]] $saltBytes = [Text.Encoding]::UTF8.GetBytes($SALT)
 
-#PBKDF2 IterationCount=4096
-$deriveBytes = new-Object Security.Cryptography.Rfc2898DeriveBytes($password, $saltBytes, 4096)
+    #PBKDF2 IterationCount=4096
+    $deriveBytes = new-Object Security.Cryptography.Rfc2898DeriveBytes($password, $saltBytes, 4096)
 
-<#
-$hexStringSALT = Get-HexStringFromByteArray -Data $deriveBytes.Salt    
-Write-Host "SALT (HEX):"$hexStringSALT -ForegroundColor Yellow
-#>
+    <#
+    $hexStringSALT = Get-HexStringFromByteArray -Data $deriveBytes.Salt    
+    Write-Host "SALT (HEX):"$hexStringSALT -ForegroundColor Yellow
+    #>
 
-return $deriveBytes.GetBytes($size)
+    return $deriveBytes.GetBytes($size)
 }
 
 function Encrypt-AES {
-param (
-[Parameter(Mandatory=$true)]$KeyData,
-[Parameter(Mandatory=$true)]$IVData,
-[Parameter(Mandatory=$true)]$Data
-)
+    param (
+        [Parameter(Mandatory=$true)]$KeyData,
+        [Parameter(Mandatory=$true)]$IVData,
+        [Parameter(Mandatory=$true)]$Data
+    )
 
 ### AES 128-CTS
 # KeySize = 16
@@ -350,249 +352,376 @@ param (
 }
 
 function Get-AES128Key {
-param (
-[Parameter(Mandatory=$true)]$PasswordString,
-[Parameter(Mandatory=$true)]$SALT=""
-)
+    param (
+        [Parameter(Mandatory=$true)]$PasswordString,
+        [Parameter(Mandatory=$true)]$SALT=""
+    )
 
-[byte[]] $PBKDF2 = Get-PBKDF2 -PasswordString $passwordString -SALT $SALT -KeySize 16
-#[byte[]] $nFolded = (Get-NFold-Bytes -Data ([Text.Encoding]::ASCII.GetBytes("kerberos")) -KeySize 16)
-[byte[]] $nFolded = @(107,101,114,98,101,114,111,115,123,155,91,43,147,19,43,147)
-[byte[]] $Key = $PBKDF2
-[byte[]] $IV =  @(0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0)
+    [byte[]] $PBKDF2 = Get-PBKDF2 -PasswordString $passwordString -SALT $SALT -KeySize 16
+    #[byte[]] $nFolded = (Get-NFold-Bytes -Data ([Text.Encoding]::ASCII.GetBytes("kerberos")) -KeySize 16)
+    [byte[]] $nFolded = @(107,101,114,98,101,114,111,115,123,155,91,43,147,19,43,147)
+    [byte[]] $Key = $PBKDF2
+    [byte[]] $IV =  @(0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0)
 
-$AES128Key = Encrypt-AES -KeyData $key -IVData $IV -Data $nFolded
-return $(Get-HexStringFromByteArray -Data $AES128Key)
+    $AES128Key = Encrypt-AES -KeyData $key -IVData $IV -Data $nFolded
+    return $(Get-HexStringFromByteArray -Data $AES128Key)
 }
 
 function Get-AES256Key {
-param (
-[Parameter(Mandatory=$true)]$PasswordString,
-[Parameter(Mandatory=$true)]$SALT=""
-)
+    param (
+        [Parameter(Mandatory=$true)]$PasswordString,
+        [Parameter(Mandatory=$true)]$SALT=""
+    )
 
-[byte[]] $PBKDF2 = Get-PBKDF2 -PasswordString $passwordString -SALT $SALT -KeySize 32
-#[byte[]] $nFolded = (Get-NFold-Bytes -Data ([Text.Encoding]::ASCII.GetBytes("kerberos")) -KeySize 16)
-[byte[]] $nFolded = @(107,101,114,98,101,114,111,115,123,155,91,43,147,19,43,147)
-[byte[]] $Key = $PBKDF2
-[byte[]] $IV =  @(0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0)
+    [byte[]] $PBKDF2 = Get-PBKDF2 -PasswordString $passwordString -SALT $SALT -KeySize 32
+    #[byte[]] $nFolded = (Get-NFold-Bytes -Data ([Text.Encoding]::ASCII.GetBytes("kerberos")) -KeySize 16)
+    [byte[]] $nFolded = @(107,101,114,98,101,114,111,115,123,155,91,43,147,19,43,147)
+    [byte[]] $Key = $PBKDF2
+    [byte[]] $IV =  @(0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0)
 
-$k1 = Encrypt-AES -KeyData $key -IVData $IV -Data $nFolded
-$k2 = Encrypt-AES -KeyData $key -IVData $IV -Data $k1
+    $k1 = Encrypt-AES -KeyData $key -IVData $IV -Data $nFolded
+    $k2 = Encrypt-AES -KeyData $key -IVData $IV -Data $k1
 
-$AES256Key = $k1 + $k2
-return $(Get-HexStringFromByteArray -Data $AES256Key)
+    $AES256Key = $k1 + $k2
+    return $(Get-HexStringFromByteArray -Data $AES256Key)
 }
 
 function Get-HexStringFromByteArray{
-param (
-[Parameter(Mandatory=$true,Position=0)][byte[]]$Data
-)
-$hexString = $null
+    param (
+        [Parameter(Mandatory=$true,Position=0)][byte[]]$Data
+    )
+    $hexString = $null
 
-        $sb = New-Object System.Text.StringBuilder ($Data.Length * 2)
-        foreach($b in $Data)
-        {
-            $sb.AppendFormat("{0:x2}", $b) |Out-Null
-        }
-        $hexString = $sb.ToString().ToUpper([CultureInfo]::InvariantCulture)
+    $sb = New-Object System.Text.StringBuilder ($Data.Length * 2)
+    foreach($b in $Data)
+    {
+        $sb.AppendFormat("{0:x2}", $b) |Out-Null
+    }
+    $hexString = $sb.ToString().ToUpper([CultureInfo]::InvariantCulture)
 
-return $hexString
+    return $hexString
 }
 
 function Get-ByteArrayFromHexString{
-param 
-(
-[Parameter(Mandatory=$true)][String]$HexString
-)
-        $i = 0;
-        $bytes = @()
-        while($i -lt $HexString.Length)
-        {
-            $chars = $HexString.SubString($i, 2)
-            $b = [Convert]::ToByte($chars, 16)
-            $bytes += $b
-            $i = $i+2
-        }
-return $bytes
+    param 
+    (
+        [Parameter(Mandatory=$true)][String]$HexString
+    )
+    $i = 0;
+    $bytes = @()
+    while($i -lt $HexString.Length)
+    {
+        $chars = $HexString.SubString($i, 2)
+        $b = [Convert]::ToByte($chars, 16)
+        $bytes += $b
+        $i = $i+2
+    }
+    return $bytes
 }
 
 function Get-BytesBigEndian {
-param (
-[Parameter(Mandatory=$true)]$Value,
-[Parameter(Mandatory=$true)][ValidateSet("16", "32")][String[]]$BitSize
-)
+    param (
+        [Parameter(Mandatory=$true)]$Value,
+        [Parameter(Mandatory=$true)][ValidateSet("16", "32")][String[]]$BitSize
+    )
 
-### Set Key Type
-[byte[]] $bytes = @()
-switch($BitSize){
-"16"{
-    $bytes = [BitCOnverter]::GetBytes([int16]$Value)
-    if([BitCOnverter]::IsLittleEndian){
-    [Array]::Reverse($bytes)
-    }
-    break;
-    }
-"32"{
-    $bytes = [BitCOnverter]::GetBytes([int32]$Value)
-    if([BitCOnverter]::IsLittleEndian){
-    [Array]::Reverse($bytes)
-    }
-    break;
-     }
-default{}
+    ### Set Key Type
+    [byte[]] $bytes = @()
+    switch($BitSize){
+    "16"{
+        $bytes = [BitCOnverter]::GetBytes([int16]$Value)
+        if([BitCOnverter]::IsLittleEndian){
+        [Array]::Reverse($bytes)
+        }
+        break;
+        }
+    "32"{
+        $bytes = [BitCOnverter]::GetBytes([int32]$Value)
+        if([BitCOnverter]::IsLittleEndian){
+        [Array]::Reverse($bytes)
+        }
+        break;
+         }
+    default{}
 }
 
 return $bytes
 }
 
 function Get-PrincipalType {
-param (
-[Parameter(Mandatory=$true)][ValidateSet("KRB5_NT_PRINCIPAL", "KRB5_NT_SRV_INST", "KRB5_NT_SRV_HST", "KRB5_NT_UID")][String[]]$PrincipalType
-)
+    param (
+        [Parameter(Mandatory=$true)][ValidateSet("KRB5_NT_PRINCIPAL", "KRB5_NT_SRV_INST", "KRB5_NT_SRV_HST", "KRB5_NT_UID")][String[]]$PrincipalType
+    )
 
-[byte[]] $nameType = @()
+    [byte[]] $nameType = @()
 
-switch($PrincipalType){
-"KRB5_NT_PRINCIPAL"{$nameType = @(00,00,00,01);break}
-"KRB5_NT_SRV_INST"{$nameType = @(00,00,00,02);break}
-"KRB5_NT_SRV_HST"{$nameType = @(00,00,00,03);break}
-"KRB5_NT_UID"{$nameType = @(00,00,00,05);break}
-default{$nameType = @(00,00,00,01);break}
-}
+    switch($PrincipalType){
+        "KRB5_NT_PRINCIPAL"{$nameType = @(00,00,00,01);break}
+        "KRB5_NT_SRV_INST"{$nameType = @(00,00,00,02);break}
+        "KRB5_NT_SRV_HST"{$nameType = @(00,00,00,03);break}
+        "KRB5_NT_UID"{$nameType = @(00,00,00,05);break}
+        default{$nameType = @(00,00,00,01);break}
+    }
 
-return $nameType
+    return $nameType
 }
 
 function Create-KeyTabEntry {
-param (
-[Parameter(Mandatory=$true)]$PasswordString,
-[Parameter(Mandatory=$true)]$RealmString,
-[Parameter(Mandatory=$true)]$Components,
-[Parameter(Mandatory=$false)]$SALT="",
-[Parameter(Mandatory=$false)]$KVNO=1,
-[Parameter(Mandatory=$true)][ValidateSet("KRB5_NT_PRINCIPAL", "KRB5_NT_SRV_INST", "KRB5_NT_SRV_HST", "KRB5_NT_UID")][String[]]$PrincipalType,
-[Parameter(Mandatory=$true)][ValidateSet("RC4", "AES128", "AES256")][String[]]$EncryptionKeyType
-)
+    param (
+        [Parameter(Mandatory=$true)]$PasswordString,
+        [Parameter(Mandatory=$true)]$RealmString,
+        [Parameter(Mandatory=$true)]$Components,
+        [Parameter(Mandatory=$false)]$SALT="",
+        [Parameter(Mandatory=$false)]$KVNO=1,
+        [Parameter(Mandatory=$true)][ValidateSet("KRB5_NT_PRINCIPAL", "KRB5_NT_SRV_INST", "KRB5_NT_SRV_HST", "KRB5_NT_UID")][String[]]$PrincipalType,
+        [Parameter(Mandatory=$true)][ValidateSet("RC4", "AES128", "AES256")][String[]]$EncryptionKeyType
+    )
 
-### Key Types: RC4 0x17 (23), AES128  0x11 (17), AES256  0x12 (18)
+    ### Key Types: RC4 0x17 (23), AES128  0x11 (17), AES256  0x12 (18)
 
-### Set Key Type
-[byte[]] $keyType = @()
-[byte[]] $sizeKeyBlock = @()
+    ### Set Key Type
+    [byte[]] $keyType = @()
+    [byte[]] $sizeKeyBlock = @()
 
-switch($EncryptionKeyType){
-"RC4"{
-       $keyType = @(00,23)
-       $sizeKey = 16
-       $sizeKeyBlock = @(00,16)
-       ### Create RC4-HMAC Key. Unicode is required for MD4 hash input.
-       [byte[]]$password = [Text.Encoding]::Unicode.GetBytes($passwordString)
-       $keyBlock = Get-MD4 -bArray $password -UpperCase
-       break
-       }
-"AES128"{
-        $keyType = @(00,17)
-        $sizeKey = 16
-        $sizeKeyBlock = @(00,16)
-        #$keyBlock = Get-AES128Key -PasswordString $passwordString -Realm $RealmString -Principal $PrincipalString -SALT $SALT
-        $keyBlock = Get-AES128Key -PasswordString $passwordString -SALT $SALT
-        break
+    switch($EncryptionKeyType){
+    "RC4"{
+           $keyType = @(00,23)
+           $sizeKey = 16
+           $sizeKeyBlock = @(00,16)
+           ### Create RC4-HMAC Key. Unicode is required for MD4 hash input.
+           [byte[]]$password = [Text.Encoding]::Unicode.GetBytes($passwordString)
+           $keyBlock = Get-MD4 -bArray $password -UpperCase
+           break
+           }
+    "AES128"{
+            $keyType = @(00,17)
+            $sizeKey = 16
+            $sizeKeyBlock = @(00,16)
+            #$keyBlock = Get-AES128Key -PasswordString $passwordString -Realm $RealmString -Principal $PrincipalString -SALT $SALT
+            $keyBlock = Get-AES128Key -PasswordString $passwordString -SALT $SALT
+            break
+            }
+    "AES256"{
+            $keyType = @(00,18)
+            $sizeKey = 32
+            $sizeKeyBlock = @(00,32)
+            #$keyBlock = Get-AES256Key -PasswordString $passwordString -Realm $RealmString -Principal $PrincipalString -SALT $SALT
+            $keyBlock = Get-AES256Key -PasswordString $passwordString -SALT $SALT
+            break
+            }
+    default{}
+    }
+
+    ### Set Principal Type
+    [byte[]] $nameType = @()
+    switch($PrincipalType){
+    "KRB5_NT_PRINCIPAL"{$nameType = @(00,00,00,01);break}
+    "KRB5_NT_SRV_INST"{$nameType = @(00,00,00,02);break}
+    "KRB5_NT_SRV_HST"{$nameType = @(00,00,00,03);break}
+    "KRB5_NT_UID"{$nameType = @(00,00,00,05);break}
+    default{$nameType = @(00,00,00,01);break}
+    }
+
+    ### KVNO larger than 255 requires 32bit KVNO field at the end of the record
+    $vno = @()
+
+    if($kvno -le 255){
+    $vno = @([byte]$kvno)
+    } else {
+    $vno = @(00)
+    }
+
+    [byte[]]$numComponents = Get-BytesBigEndian -BitSize 16 -Value $components.Count
+
+    ### To Set TimeStamp To Jan 1, 1970 - [byte[]]$timeStamp = @(0,0,0,0)
+    ### [byte[]]$timeStamp = Get-BytesBigEndian -BitSize 32 -Value ([int]([Math]::Truncate((Get-Date(Get-Date).ToUniversalTime() -UFormat %s))))
+    ### 15 September 2020 Updated
+    ### https://github.com/matherm-aboehm suggested use of [decimal]::Parse to fix timestamp error on localized versions of Windows.
+    [byte[]]$timeStamp = Get-BytesBigEndian -BitSize 32 -Value ([int]([Math]::Truncate([decimal]::Parse((Get-Date(Get-Date).ToUniversalTime() -UFormat %s)))))
+
+    ### Data size information for KeyEntry
+    # num_components bytes   = 2
+    # realm bytes            = variable (2 bytes) + length
+    # components array bytes = varable (2 bytes) + length for each component. Component count should be typically 1 or 2.
+    # name type bytes        = 4
+    # timestamp bytes        = 4
+    # kvno bytes             = 1 or 4
+    # Key Type bytes         = 2
+    # Key bytes              = 2 + 16 or 32 "RC4 and AES128 are 16 Byte Keys. AES 256 is 32"
+
+    $sizeRealm  = Get-BytesBigEndian -Value ([Text.Encoding]::UTF8.GetByteCount($realmString)) -BitSize 16
+    [Int32]$sizeKeyTabEntry = 2 #NumComponentsSize
+    $sizeKeyTabEntry += 2 #RealmLength Byte Count 
+    $sizeKeyTabEntry += ([Text.Encoding]::UTF8.GetByteCount($realmString))
+        foreach($principal in $Components){
+        $sizePrincipal = ([Text.Encoding]::UTF8.GetByteCount($principal))
+        $sizeKeyTabEntry += $sizePrincipal + 2
         }
-"AES256"{
-        $keyType = @(00,18)
-        $sizeKey = 32
-        $sizeKeyBlock = @(00,32)
-        #$keyBlock = Get-AES256Key -PasswordString $passwordString -Realm $RealmString -Principal $PrincipalString -SALT $SALT
-        $keyBlock = Get-AES256Key -PasswordString $passwordString -SALT $SALT
-        break
+    $sizeKeyTabEntry += 4 #NameType
+    $sizeKeyTabEntry += 4 #TimeStamp
+    $sizeKeyTabEntry += 1 #KVNO 8bit
+    $sizeKeyTabEntry += 2 #KeyType
+    $sizeKeyTabEntry += 2 #Key Length Count
+    $sizeKeyTabEntry += $sizeKey
+
+    $sizeTotal = Get-BytesBigEndian -Value $sizeKeyTabEntry -BitSize 32
+
+    [byte[]] $keytabEntry = @()
+    $keytabEntry += $sizeTotal
+    $keytabEntry += $numComponents
+    $keytabEntry += $sizeRealm
+    $keytabEntry += [byte[]][Text.Encoding]::UTF8.GetBytes($realmString)
+        foreach($principal in $Components){
+        $sizePrincipal = Get-BytesBigEndian -Value ([Text.Encoding]::UTF8.GetByteCount($principal)) -BitSize 16
+        $keytabEntry += $sizePrincipal
+        $keytabEntry += [byte[]][Text.Encoding]::UTF8.GetBytes($principal)
         }
-default{}
+    $keytabEntry += $nameType
+    $keytabEntry += $timeStamp
+    $keytabEntry += $vno
+    $keytabEntry += $keyType
+    $keytabEntry += $sizeKeyBlock
+    $keytabEntry += Get-ByteArrayFromHexString -HexString $keyBlock
+
+    $keytabEntryObject = [PsCustomObject]@{
+            Size           = $sizeKeyTabEntry
+            NumComponents  = $numComponents
+            Realm          = [byte[]][Text.Encoding]::UTF8.GetBytes($realmString)
+            Components     = $components
+            NameType       = $nameType
+            TimeStamp      = $timeStamp
+            KeyType        = $keyType
+            KeyBlock       = $keyBlock
+            KeytabEntry    = $keytabEntry
+        }
+    return $keytabEntryObject
 }
 
-### Set Principal Type
-[byte[]] $nameType = @()
-switch($PrincipalType){
-"KRB5_NT_PRINCIPAL"{$nameType = @(00,00,00,01);break}
-"KRB5_NT_SRV_INST"{$nameType = @(00,00,00,02);break}
-"KRB5_NT_SRV_HST"{$nameType = @(00,00,00,03);break}
-"KRB5_NT_UID"{$nameType = @(00,00,00,05);break}
-default{$nameType = @(00,00,00,01);break}
-}
+function Create-KeyTabEntryFromHash {
+    param (
+        [Parameter(Mandatory=$true)]$RealmString,
+        [Parameter(Mandatory=$true)]$Components,
+        [Parameter(Mandatory=$false)]$SALT="",
+        [Parameter(Mandatory=$false)]$KVNO=1,
+        [Parameter(Mandatory=$true)]$HASH="",
+        [Parameter(Mandatory=$true)][ValidateSet("KRB5_NT_PRINCIPAL", "KRB5_NT_SRV_INST", "KRB5_NT_SRV_HST", "KRB5_NT_UID")][String[]]$PrincipalType,
+        [Parameter(Mandatory=$true)][ValidateSet("RC4", "AES128", "AES256")][String[]]$EncryptionKeyType
+    )
 
-### KVNO larger than 255 requires 32bit KVNO field at the end of the record
-$vno = @()
+    ### Key Types: RC4 0x17 (23), AES128  0x11 (17), AES256  0x12 (18)
 
-if($kvno -le 255){
-$vno = @([byte]$kvno)
-} else {
-$vno = @(00)
-}
+    ### Set Key Type
+    [byte[]] $keyType = @()
+    [byte[]] $sizeKeyBlock = @()
 
-[byte[]]$numComponents = Get-BytesBigEndian -BitSize 16 -Value $components.Count
-
-### To Set TimeStamp To Jan 1, 1970 - [byte[]]$timeStamp = @(0,0,0,0)
-### [byte[]]$timeStamp = Get-BytesBigEndian -BitSize 32 -Value ([int]([Math]::Truncate((Get-Date(Get-Date).ToUniversalTime() -UFormat %s))))
-### 15 September 2020 Updated
-### https://github.com/matherm-aboehm suggested use of [decimal]::Parse to fix timestamp error on localized versions of Windows.
-[byte[]]$timeStamp = Get-BytesBigEndian -BitSize 32 -Value ([int]([Math]::Truncate([decimal]::Parse((Get-Date(Get-Date).ToUniversalTime() -UFormat %s)))))
-
-### Data size information for KeyEntry
-# num_components bytes   = 2
-# realm bytes            = variable (2 bytes) + length
-# components array bytes = varable (2 bytes) + length for each component. Component count should be typically 1 or 2.
-# name type bytes        = 4
-# timestamp bytes        = 4
-# kvno bytes             = 1 or 4
-# Key Type bytes         = 2
-# Key bytes              = 2 + 16 or 32 "RC4 and AES128 are 16 Byte Keys. AES 256 is 32"
-
-$sizeRealm  = Get-BytesBigEndian -Value ([Text.Encoding]::UTF8.GetByteCount($realmString)) -BitSize 16
-[Int32]$sizeKeyTabEntry = 2 #NumComponentsSize
-$sizeKeyTabEntry += 2 #RealmLength Byte Count 
-$sizeKeyTabEntry += ([Text.Encoding]::UTF8.GetByteCount($realmString))
-    foreach($principal in $Components){
-    $sizePrincipal = ([Text.Encoding]::UTF8.GetByteCount($principal))
-    $sizeKeyTabEntry += $sizePrincipal + 2
+    switch($EncryptionKeyType){
+        "RC4"{
+            $keyType = @(00,23)
+            $sizeKey = 16
+            $sizeKeyBlock = @(00,16)
+            $keyBlock = $HASH.ToUpper()
+            break
+            }
+        "AES128"{
+            $keyType = @(00,17)
+            $sizeKey = 16
+            $sizeKeyBlock = @(00,16)
+            $keyBlock =$HASH.ToUpper()
+            break
+            }
+        "AES256"{
+            $keyType = @(00,18)
+            $sizeKey = 32
+            $sizeKeyBlock = @(00,32)
+            $keyBlock = $HASH.ToUpper()
+            break
+            }
+    default{}
     }
-$sizeKeyTabEntry += 4 #NameType
-$sizeKeyTabEntry += 4 #TimeStamp
-$sizeKeyTabEntry += 1 #KVNO 8bit
-$sizeKeyTabEntry += 2 #KeyType
-$sizeKeyTabEntry += 2 #Key Length Count
-$sizeKeyTabEntry += $sizeKey
 
-$sizeTotal = Get-BytesBigEndian -Value $sizeKeyTabEntry -BitSize 32
+    ### Set Principal Type
+    [byte[]] $nameType = @()
+    switch($PrincipalType){
+        "KRB5_NT_PRINCIPAL"{$nameType = @(00,00,00,01);break}
+        "KRB5_NT_SRV_INST"{$nameType = @(00,00,00,02);break}
+        "KRB5_NT_SRV_HST"{$nameType = @(00,00,00,03);break}
+        "KRB5_NT_UID"{$nameType = @(00,00,00,05);break}
+        default{$nameType = @(00,00,00,01);break}
+        }
 
-[byte[]] $keytabEntry = @()
-$keytabEntry += $sizeTotal
-$keytabEntry += $numComponents
-$keytabEntry += $sizeRealm
-$keytabEntry += [byte[]][Text.Encoding]::UTF8.GetBytes($realmString)
-    foreach($principal in $Components){
-    $sizePrincipal = Get-BytesBigEndian -Value ([Text.Encoding]::UTF8.GetByteCount($principal)) -BitSize 16
-    $keytabEntry += $sizePrincipal
-    $keytabEntry += [byte[]][Text.Encoding]::UTF8.GetBytes($principal)
+    ### KVNO larger than 255 requires 32bit KVNO field at the end of the record
+    $vno = @()
+
+    if($kvno -le 255){
+        $vno = @([byte]$kvno)
+    } else {
+    $vno = @(00)
     }
-$keytabEntry += $nameType
-$keytabEntry += $timeStamp
-$keytabEntry += $vno
-$keytabEntry += $keyType
-$keytabEntry += $sizeKeyBlock
-$keytabEntry += Get-ByteArrayFromHexString -HexString $keyBlock
 
-$keytabEntryObject = [PsCustomObject]@{
-        Size           = $sizeKeyTabEntry
-        NumComponents  = $numComponents
-        Realm          = [byte[]][Text.Encoding]::UTF8.GetBytes($realmString)
-        Components     = $components
-        NameType       = $nameType
-        TimeStamp      = $timeStamp
-        KeyType        = $keyType
-        KeyBlock       = $keyBlock
-        KeytabEntry    = $keytabEntry
-    }
-return $keytabEntryObject
+    [byte[]]$numComponents = Get-BytesBigEndian -BitSize 16 -Value $components.Count
+
+    ### To Set TimeStamp To Jan 1, 1970 - [byte[]]$timeStamp = @(0,0,0,0)
+    ### [byte[]]$timeStamp = Get-BytesBigEndian -BitSize 32 -Value ([int]([Math]::Truncate((Get-Date(Get-Date).ToUniversalTime() -UFormat %s))))
+    ### 15 September 2020 Updated
+    ### https://github.com/matherm-aboehm suggested use of [decimal]::Parse to fix timestamp error on localized versions of Windows.
+    [byte[]]$timeStamp = Get-BytesBigEndian -BitSize 32 -Value ([int]([Math]::Truncate([decimal]::Parse((Get-Date(Get-Date).ToUniversalTime() -UFormat %s)))))
+
+    ### Data size information for KeyEntry
+    # num_components bytes   = 2
+    # realm bytes            = variable (2 bytes) + length
+    # components array bytes = varable (2 bytes) + length for each component. Component count should be typically 1 or 2.
+    # name type bytes        = 4
+    # timestamp bytes        = 4
+    # kvno bytes             = 1 or 4
+    # Key Type bytes         = 2
+    # Key bytes              = 2 + 16 or 32 "RC4 and AES128 are 16 Byte Keys. AES 256 is 32"
+
+    $sizeRealm  = Get-BytesBigEndian -Value ([Text.Encoding]::UTF8.GetByteCount($realmString)) -BitSize 16
+    [Int32]$sizeKeyTabEntry = 2 #NumComponentsSize
+    $sizeKeyTabEntry += 2 #RealmLength Byte Count 
+    $sizeKeyTabEntry += ([Text.Encoding]::UTF8.GetByteCount($realmString))
+        foreach($principal in $Components){
+        $sizePrincipal = ([Text.Encoding]::UTF8.GetByteCount($principal))
+        $sizeKeyTabEntry += $sizePrincipal + 2
+        }
+    $sizeKeyTabEntry += 4 #NameType
+    $sizeKeyTabEntry += 4 #TimeStamp
+    $sizeKeyTabEntry += 1 #KVNO 8bit
+    $sizeKeyTabEntry += 2 #KeyType
+    $sizeKeyTabEntry += 2 #Key Length Count
+    $sizeKeyTabEntry += $sizeKey
+
+    $sizeTotal = Get-BytesBigEndian -Value $sizeKeyTabEntry -BitSize 32
+
+    [byte[]] $keytabEntry = @()
+    $keytabEntry += $sizeTotal
+    $keytabEntry += $numComponents
+    $keytabEntry += $sizeRealm
+    $keytabEntry += [byte[]][Text.Encoding]::UTF8.GetBytes($realmString)
+        foreach($principal in $Components){
+        $sizePrincipal = Get-BytesBigEndian -Value ([Text.Encoding]::UTF8.GetByteCount($principal)) -BitSize 16
+        $keytabEntry += $sizePrincipal
+        $keytabEntry += [byte[]][Text.Encoding]::UTF8.GetBytes($principal)
+        }
+    $keytabEntry += $nameType
+    $keytabEntry += $timeStamp
+    $keytabEntry += $vno
+    $keytabEntry += $keyType
+    $keytabEntry += $sizeKeyBlock
+    $keytabEntry += Get-ByteArrayFromHexString -HexString $keyBlock
+
+    $keytabEntryObject = [PsCustomObject]@{
+            Size           = $sizeKeyTabEntry
+            NumComponents  = $numComponents
+            Realm          = [byte[]][Text.Encoding]::UTF8.GetBytes($realmString)
+            Components     = $components
+            NameType       = $nameType
+            TimeStamp      = $timeStamp
+            KeyType        = $keyType
+            KeyBlock       = $keyBlock
+            KeytabEntry    = $keytabEntry
+        }
+    return $keytabEntryObject
 }
 
 Function Get-Password {
@@ -605,15 +734,16 @@ Function Get-Password {
 return $password
 }
 
-
-if ([string]::IsNullOrEmpty($Password)){$Password = $(Get-Password)}
+if (($RC4 -eq $true) -or ($AES128 -eq $true) -or ($AES256 -eq $true)){
+    if ([string]::IsNullOrEmpty($Password)){$Password = $(Get-Password)}
+}
 
 if ([string]::IsNullOrEmpty($File)){$File=$(Get-Location).Path+'\login.keytab'}
 
 if($Quiet) {
-$Script:Silent = $true
+    $Script:Silent = $true
 } else {
-$Script:Silent = $false
+    $Script:Silent = $false
 }
 
 ### Force Realm to UPPERCASE
@@ -624,11 +754,10 @@ $PrincipalArray = @()
 $PrincipalArray = $Principal.Split(',')
 ### Check For Custom SALT
 if([string]::IsNullOrEmpty($SALT) -eq $true) {
-$SALT = $Realm
-for($i=0;$i -lt $PrincipalArray.Count;$i++){
-$SALT += $($PrincipalArray[$i].Replace('/',""))
-}
-
+    $SALT = $Realm
+    for($i=0;$i -lt $PrincipalArray.Count;$i++){
+    $SALT += $($PrincipalArray[$i].Replace('/',""))
+    }
 }
 ### Finish spliting principal into component parts. PrincipalArray should have at most 2 elements. Testing with Java based tools, 
 ### the keytab entry can only support one UPN. The components portion of the keytab entry appears to only be for spliting
@@ -642,54 +771,72 @@ $PrincipalArray = $Principal.Split(',')
 [byte[]] $keyTabEntries = @()
 
 ### Set Default Encryption to AES256 if none of the E-Type switches are set
-if(!$RC4 -and !$AES128 -and !$AES256){
-$AES256 = $true
-}
+#if(!$RC4 -and !$AES128 -and !$AES256){
+#    $AES256 = $true
+#}
 
 ### Truncate KVNO
 [Byte[]] $KVNO = [Byte[]](Get-BytesBigEndian -BitSize 32 -Value $KVNO)
 [int16] $KVNO = [int]$KVNO[3]
 
 ### Create KeyTab Entries for selected E-Types RC4/AES128/AES256 supported
-$keytabEntry = $null
-if($RC4 -eq $true){
-$keytabEntry = Create-KeyTabEntry `
--realmString $Realm -Components $PrincipalArray -passwordString $Password `
--PrincipalType $PType -EncryptionKeyType RC4 -KVNO $KVNO
-$keyTabEntries += $keytabEntry.KeytabEntry
-if($Script:Silent -eq $false){ Write-Host "RC4:"$keytabEntry.KeyBlock -ForegroundColor Cyan}
+
+if (($RC4 -eq $true) -or ($AES128 -eq $true) -or ($AES256 -eq $true)){
+    $keytabEntry = $null
+    if($RC4 -eq $true){
+        $keytabEntry = Create-KeyTabEntry -realmString $Realm -Components $PrincipalArray -passwordString $Password -PrincipalType $PType -EncryptionKeyType RC4 -KVNO $KVNO
+        $keyTabEntries += $keytabEntry.KeytabEntry
+        if($Script:Silent -eq $false){ Write-Host "RC4:"$keytabEntry.KeyBlock -ForegroundColor Cyan}
+    }
+    $keytabEntry = $null
+    if($AES128 -eq $true){
+        $keytabEntry = Create-KeyTabEntry -realmString $Realm -Components $PrincipalArray -passwordString $Password -PrincipalType $PType -EncryptionKeyType AES128 -KVNO $KVNO -SALT $SALT
+        $keyTabEntries += $keytabEntry.KeytabEntry
+    if($Script:Silent -eq $false){ Write-Host "AES128:"$keytabEntry.KeyBlock -ForegroundColor Cyan}
+    }
+    $keytabEntry = $null
+    if($AES256 -eq $true){
+        $keytabEntry = Create-KeyTabEntry -realmString $Realm -Components $PrincipalArray -passwordString $Password -PrincipalType $PType -EncryptionKeyType AES256 -KVNO $KVNO -SALT $SALT
+        $keyTabEntries += $keytabEntry.KeytabEntry
+        if($Script:Silent -eq $false){ Write-Host "AES256:"$keytabEntry.KeyBlock -ForegroundColor Cyan}
+    }
 }
-$keytabEntry = $null
-if($AES128 -eq $true){
-$keytabEntry = Create-KeyTabEntry `
--realmString $Realm -Components $PrincipalArray -passwordString $Password `
--PrincipalType $PType -EncryptionKeyType AES128 -KVNO $KVNO -SALT $SALT
-$keyTabEntries += $keytabEntry.KeytabEntry
-if($Script:Silent -eq $false){ Write-Host "AES128:"$keytabEntry.KeyBlock -ForegroundColor Cyan}
-}
-$keytabEntry = $null
-if($AES256 -eq $true){
-$keytabEntry = Create-KeyTabEntry `
--realmString $Realm -Components $PrincipalArray -passwordString $Password `
--PrincipalType $PType -EncryptionKeyType AES256 -KVNO $KVNO -SALT $SALT
-$keyTabEntries += $keytabEntry.KeytabEntry
-if($Script:Silent -eq $false){ Write-Host "AES256:"$keytabEntry.KeyBlock -ForegroundColor Cyan}
+
+if (($RC4Hash.Length -gt 0) -or ($AES128Hash.Length -gt 0) -or ($AES256Hash.Length -gt 0)){
+    $keytabEntry = $null
+    if($RC4Hash.Length -gt 0){
+        $keytabEntry = Create-KeyTabEntryFromHash -realmString $Realm -Components $PrincipalArray -HASH $RC4Hash -PrincipalType $PType -EncryptionKeyType RC4 -KVNO $KVNO
+        $keyTabEntries += $keytabEntry.KeytabEntry
+        if($Script:Silent -eq $false){ Write-Host "RC4:"$keytabEntry.KeyBlock -ForegroundColor Cyan}
+    }
+    $keytabEntry = $null
+    if($AES128Hash.Length -gt 0){
+        $keytabEntry = Create-KeyTabEntryFromHash -realmString $Realm -Components $PrincipalArray -HASH $AES128Hash -PrincipalType $PType -EncryptionKeyType AES128 -KVNO $KVNO -SALT $SALT
+        $keyTabEntries += $keytabEntry.KeytabEntry
+    if($Script:Silent -eq $false){ Write-Host "AES128:"$keytabEntry.KeyBlock -ForegroundColor Cyan}
+    }
+    $keytabEntry = $null
+    if($AES256Hash.Length -gt 0){
+        $keytabEntry = Create-KeyTabEntryFromHash -realmString $Realm -Components $PrincipalArray -HASH $AES256Hash -PrincipalType $PType -EncryptionKeyType AES256 -KVNO $KVNO -SALT $SALT
+        $keyTabEntries += $keytabEntry.KeytabEntry
+        if($Script:Silent -eq $false){ Write-Host "AES256:"$keytabEntry.KeyBlock -ForegroundColor Cyan}
+    }
 }
 
 if($Script:Silent -eq $false){
-Write-Host $("Principal Type:").PadLeft(15)$PType -ForegroundColor Green
-Write-Host $("Realm:").PadLeft(15)$Realm -ForegroundColor Green
-Write-Host $("User Name:").PadLeft(15)$PrincipalText -ForegroundColor Green
-Write-Host $("SALT:").PadLeft(15)$SALT -ForegroundColor Green
-Write-Host $("Keytab File:").PadLeft(15)$File -ForegroundColor Green
-Write-Host $("Append File:").PadLeft(15)$Append -ForegroundColor Green
-Write-Host ""
+    Write-Host $("Principal Type:").PadLeft(15)$PType -ForegroundColor Green
+    Write-Host $("Realm:").PadLeft(15)$Realm -ForegroundColor Green
+    Write-Host $("User Name:").PadLeft(15)$PrincipalText -ForegroundColor Green
+    Write-Host $("SALT:").PadLeft(15)$SALT -ForegroundColor Green
+    Write-Host $("Keytab File:").PadLeft(15)$File -ForegroundColor Green
+    Write-Host $("Append File:").PadLeft(15)$Append -ForegroundColor Green
+    Write-Host ""
 }
 
 if(!$NoPrompt){
-Write-Host "Press Enter to Write KeyTab File /Ctrl+C to quit..." -ForegroundColor Yellow -NoNewline
-[void](Read-Host)
-Write-Host ""
+    Write-Host "Press Enter to Write KeyTab File /Ctrl+C to quit..." -ForegroundColor Yellow -NoNewline
+    [void](Read-Host)
+    Write-Host ""
 }
 
 if($Append -eq $true){
@@ -704,8 +851,8 @@ $fileBytes = @()
     [System.IO.File]::WriteAllBytes($File,$fileBytes)
     }
 } else {
-$fileBytes = @()
-$fileBytes += $keyTabVersion
-$fileBytes += $keyTabEntries
-[System.IO.File]::WriteAllBytes($File,$fileBytes)
+    $fileBytes = @()
+    $fileBytes += $keyTabVersion
+    $fileBytes += $keyTabEntries
+    [System.IO.File]::WriteAllBytes($File,$fileBytes)
 }
